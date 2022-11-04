@@ -1,0 +1,78 @@
+name: Build
+
+on:
+  release:
+    types:
+      - created
+  workflow_dispatch:
+
+env:
+  VERSION: ${{ github.event.release.tag_name || '0.0.0' }}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - 
+            os: ubuntu-20.04
+            artifact_name_os: linux
+            artifact_name_arch: x64
+          - 
+            os: windows-2019
+            artifact_name_os: windows
+            artifact_name_arch: x64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+          repository: Mojang/leveldb-mcpe
+          ref: 278d5665dc4f59f4a579d0993303ad590b843b85
+
+      - name: Create artifact name
+        id: create-artifact-name
+        shell: bash
+        run: |
+          NAME=${{ matrix.artifact_name_os }}-${{ matrix.artifact_name_arch }}
+          STEM=leveldb-mcpe-aoirint-${NAME}-${{ env.VERSION }}
+
+          echo "name=${NAME}-zip" >> "$GITHUB_OUTPUT"
+          echo "stem=${STEM}" >> "$GITHUB_OUTPUT"
+          echo "file=${STEM}.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        shell: bash
+        run: |
+          make
+
+      - name: Copy build results
+        shell: bash
+        run: |
+          mkdir release
+          cp out-shared/libleveldb.so release/ || true
+          cp out-shared/LevelDB-*.dll release/ || true
+
+      - name: Compress
+        shell: bash
+        run: |
+          mv release "${{ steps.create-artifact-name.outputs.stem }}"
+          zip -r "${{ steps.create-artifact-name.outputs.file }}" "${{ steps.create-artifact-name.outputs.stem }}"/
+
+      - name: Upload to artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ steps.create-artifact-name.outputs.name }}
+          path: ${{ steps.create-artifact-name.outputs.file }}
+
+      - name: Upload to release
+        if: github.event.release.tag_name != ''
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.VERSION }}
+          files: |-
+            ${{ steps.create-artifact-name.outputs.file }}
+          target_commitish: ${{ github.sha }}
